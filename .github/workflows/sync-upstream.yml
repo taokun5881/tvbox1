@@ -1,0 +1,58 @@
+name: Safe Sync Upstream (Protect Workflows)
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream
+        run: |
+          git remote add upstream https://github.com/qist/tvbox.git || true
+          git fetch upstream
+
+      # =========================
+      # 🔥 Step 1: 同步 upstream 全部代码
+      # =========================
+      - name: Sync upstream code
+        run: |
+          git checkout master 2>/dev/null || git checkout main
+
+          # 先合并 upstream（允许更新代码）
+          git merge upstream/master --no-edit 2>/dev/null || git merge upstream/main --no-edit
+
+      # =========================
+      # 🔒 Step 2: 强制恢复 workflows（关键！）
+      # =========================
+      - name: Protect GitHub Actions workflows
+        run: |
+          git checkout HEAD -- .github/workflows || true
+
+      # =========================
+      # 💾 Step 3: 提交变更
+      # =========================
+      - name: Commit changes
+        run: |
+          git add .
+          git commit -m "sync upstream (protect workflows)" || echo "no changes"
+
+      - name: Push changes
+        run: |
+          git push origin HEAD
