@@ -1,4 +1,4 @@
-name: Safe Sync Upstream (Protect Workflows)
+name: Safe Upstream Sync (Lock Workflow File)
 
 on:
   schedule:
@@ -13,12 +13,12 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Configure git
+      - name: Git config
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -29,30 +29,28 @@ jobs:
           git fetch upstream
 
       # =========================
-      # 🔥 Step 1: 同步 upstream 全部代码
+      # 🔥 1. 同步 upstream（允许代码更新）
       # =========================
-      - name: Sync upstream code
+      - name: Merge upstream
         run: |
           git checkout master 2>/dev/null || git checkout main
-
-          # 先合并 upstream（允许更新代码）
           git merge upstream/master --no-edit 2>/dev/null || git merge upstream/main --no-edit
 
       # =========================
-      # 🔒 Step 2: 强制恢复 workflows（关键！）
+      # 🔒 2. 强制恢复单个关键文件（核心）
       # =========================
-      - name: Protect GitHub Actions workflows
+      - name: Protect sync workflow file
         run: |
-          git checkout HEAD -- .github/workflows || true
+          git checkout HEAD -- .github/workflows/sync-upstream.yml || true
 
       # =========================
-      # 💾 Step 3: 提交变更
+      # 💾 3. 提交
       # =========================
-      - name: Commit changes
+      - name: Commit
         run: |
           git add .
-          git commit -m "sync upstream (protect workflows)" || echo "no changes"
+          git commit -m "sync upstream (lock workflow file)" || echo "no changes"
 
-      - name: Push changes
+      - name: Push
         run: |
           git push origin HEAD
