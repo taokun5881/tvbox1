@@ -1,9 +1,13 @@
-name: Safe Upstream Sync (Lock Workflow File)
+name: Safe Upstream Sync (Industrial Grade)
 
 on:
   schedule:
     - cron: "*/30 * * * *"
   workflow_dispatch:
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: true
 
 jobs:
   sync:
@@ -25,32 +29,66 @@ jobs:
 
       - name: Add upstream
         run: |
-          git remote add upstream https://github.com/qist/tvbox.git || true
-          git fetch upstream
+          git remote remove upstream 2>/dev/null || true
+          git remote add upstream https://github.com/qist/tvbox.git
+          git fetch upstream --prune
 
       # =========================
-      # 🔥 1. 同步 upstream（允许代码更新）
+      # 🧠 1. 自动识别默认分支
       # =========================
-      - name: Merge upstream
+      - name: Detect branch
+        id: branch
         run: |
-          git checkout master 2>/dev/null || git checkout main
-          git merge upstream/master --no-edit 2>/dev/null || git merge upstream/main --no-edit
+          BRANCH=$(git symbolic-ref --short HEAD)
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
 
       # =========================
-      # 🔒 2. 强制恢复单个关键文件（核心）
+      # 🔒 2. 关键文件保护（提前锁定）
       # =========================
-      - name: Protect sync workflow file
+      - name: Save protected files
         run: |
-          git checkout HEAD -- .github/workflows/sync-upstream.yml || true
+          mkdir -p /tmp/protect
+          cp -f .github/workflows/sync-upstream.yml /tmp/protect/ || true
 
       # =========================
-      # 💾 3. 提交
+      # 🔥 3. 使用 rebase（更干净）
       # =========================
-      - name: Commit
+      - name: Rebase upstream
         run: |
-          git add .
-          git commit -m "sync upstream (lock workflow file)" || echo "no changes"
+          git checkout ${{ steps.branch.outputs.branch }}
+          git rebase upstream/${{ steps.branch.outputs.branch }} || {
+            echo "Rebase failed, aborting..."
+            git rebase --abort || true
+            exit 1
+          }
 
+      # =========================
+      # 🔒 4. 恢复关键文件（强制不被 upstream 覆盖）
+      # =========================
+      - name: Restore protected files
+        run: |
+          cp -f /tmp/protect/sync-upstream.yml .github/workflows/sync-upstream.yml || true
+          git checkout -- .github/workflows/sync-upstream.yml || true
+
+      # =========================
+      # 🧹 5. 自动清理冲突残留
+      # =========================
+      - name: Clean merge artifacts
+        run: |
+          git status --porcelain | grep "^UU" && exit 1 || true
+
+      # =========================
+      # 💾 6. Commit (only if needed)
+      # =========================
+      - name: Commit changes
+        run: |
+          git add -A
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "sync upstream (industrial safe mode)"
+
+      # =========================
+      # 🚀 7. Push with safety
+      # =========================
       - name: Push
         run: |
-          git push origin HEAD
+          git push origin HEAD:${{ steps.branch.outputs.branch }}
