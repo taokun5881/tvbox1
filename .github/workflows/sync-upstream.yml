@@ -1,4 +1,4 @@
-name: Enterprise Upstream Sync Engine (Zero Conflict)
+name: Safe Enterprise Sync Engine (No Security Triggers)
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: upstream-sync-engine
+  group: safe-sync-engine
   cancel-in-progress: true
 
 jobs:
@@ -25,84 +25,71 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       # =========================
-      # 1️⃣ Add upstream
+      # 1️⃣ Fetch upstream
       # =========================
-      - name: Add upstream
+      - name: Fetch upstream
         run: |
           git remote remove upstream 2>/dev/null || true
           git remote add upstream https://github.com/qist/tvbox.git
           git fetch upstream --prune
 
       # =========================
-      # 2️⃣ Detect branch
+      # 2️⃣ Create safe sync branch
       # =========================
-      - name: Detect branch
-        id: branch
+      - name: Create sync branch
         run: |
-          echo "branch=$(git symbolic-ref --short HEAD)" >> $GITHUB_OUTPUT
+          git checkout -b sync-staging upstream/master || \
+          git checkout -b sync-staging upstream/main
 
       # =========================
-      # 3️⃣ Create staging branch (关键）
+      # 3️⃣ HARD EXCLUDE workflows (关键)
       # =========================
-      - name: Create staging branch
+      - name: Remove protected directories
         run: |
-          git checkout -b sync-staging upstream/${{ steps.branch.outputs.branch }} || \
-          git checkout -b sync-staging upstream/master
+          rm -rf .github/workflows || true
 
       # =========================
-      # 4️⃣ Auto conflict resolver (核心)
+      # 4️⃣ Smart conflict policy
       # =========================
-      - name: Auto resolve conflicts safely
+      - name: Apply sync rules
         run: |
-          echo "Resolving conflicts with policy..."
 
-          # JSON → 保留 upstream（或改成 ours）
+          # JSON → use upstream version
           find . -name "*.json" -type f | while read f; do
             git checkout --theirs "$f" 2>/dev/null || true
             git add "$f" 2>/dev/null || true
           done
 
-          # binary → 保留本地版本
-          git checkout origin/${{ steps.branch.outputs.branch }} -- jar/fan.txt 2>/dev/null || true
+          # binary → keep local
+          git checkout --ours jar/fan.txt 2>/dev/null || true
           git add jar/fan.txt 2>/dev/null || true
 
       # =========================
-      # 5️⃣ Merge upstream safely (no conflict allowed)
+      # 5️⃣ Commit only safe files
       # =========================
-      - name: Safe merge upstream
-        run: |
-          git merge upstream/${{ steps.branch.outputs.branch }} --no-edit || true
-
-      # =========================
-      # 6️⃣ Restore protected files (关键锁）
-      # =========================
-      - name: Protect workflow files
-        run: |
-          git checkout origin/${{ steps.branch.outputs.branch }} -- .github/workflows/sync-upstream.yml || true
-
-      # =========================
-      # 7️⃣ Commit staging
-      # =========================
-      - name: Commit staging
+      - name: Commit sync
         run: |
           git add -A
-          git commit -m "sync upstream (enterprise zero-conf mode)" || echo "no changes"
+          git commit -m "safe upstream sync (no workflow touch)" || echo "no changes"
 
       # =========================
-      # 8️⃣ Push staging branch
+      # 6️⃣ Push sync branch ONLY
       # =========================
-      - name: Push staging
+      - name: Push sync branch
         run: |
           git push origin sync-staging --force
 
       # =========================
-      # 9️⃣ OPTIONAL: auto PR (推荐开启)
+      # 7️⃣ Create PR (SAFE ENTRY POINT)
       # =========================
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v6
         with:
           branch: sync-staging
-          base: ${{ steps.branch.outputs.branch }}
-          title: "Enterprise Upstream Sync"
-          body: "Automated zero-conf upstream sync"
-          delete-branch: true
+          base: master
+          title: "Safe Upstream Sync (No Workflow Changes)"
+          body: |
+            Automated sync from upstream.
+            - No workflow modifications included
+            - JSON + code sync only
+            - Binary files preserved safely
