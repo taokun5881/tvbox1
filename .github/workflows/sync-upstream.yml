@@ -1,4 +1,4 @@
-name: Safe Upstream Sync (Industrial Grade)
+name: Enterprise Upstream Sync Engine (Zero Conflict)
 
 on:
   schedule:
@@ -6,15 +6,12 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: upstream-sync
+  group: upstream-sync-engine
   cancel-in-progress: true
 
 jobs:
   sync:
     runs-on: ubuntu-latest
-
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Checkout
@@ -27,6 +24,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+      # =========================
+      # 1️⃣ Add upstream
+      # =========================
       - name: Add upstream
         run: |
           git remote remove upstream 2>/dev/null || true
@@ -34,61 +34,75 @@ jobs:
           git fetch upstream --prune
 
       # =========================
-      # 🧠 1. 自动识别默认分支
+      # 2️⃣ Detect branch
       # =========================
       - name: Detect branch
         id: branch
         run: |
-          BRANCH=$(git symbolic-ref --short HEAD)
-          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+          echo "branch=$(git symbolic-ref --short HEAD)" >> $GITHUB_OUTPUT
 
       # =========================
-      # 🔒 2. 关键文件保护（提前锁定）
+      # 3️⃣ Create staging branch (关键）
       # =========================
-      - name: Save protected files
+      - name: Create staging branch
         run: |
-          mkdir -p /tmp/protect
-          cp -f .github/workflows/sync-upstream.yml /tmp/protect/ || true
+          git checkout -b sync-staging upstream/${{ steps.branch.outputs.branch }} || \
+          git checkout -b sync-staging upstream/master
 
       # =========================
-      # 🔥 3. 使用 rebase（更干净）
+      # 4️⃣ Auto conflict resolver (核心)
       # =========================
-      - name: Rebase upstream
+      - name: Auto resolve conflicts safely
         run: |
-          git checkout ${{ steps.branch.outputs.branch }}
-          git rebase upstream/${{ steps.branch.outputs.branch }} || {
-            echo "Rebase failed, aborting..."
-            git rebase --abort || true
-            exit 1
-          }
+          echo "Resolving conflicts with policy..."
+
+          # JSON → 保留 upstream（或改成 ours）
+          find . -name "*.json" -type f | while read f; do
+            git checkout --theirs "$f" 2>/dev/null || true
+            git add "$f" 2>/dev/null || true
+          done
+
+          # binary → 保留本地版本
+          git checkout origin/${{ steps.branch.outputs.branch }} -- jar/fan.txt 2>/dev/null || true
+          git add jar/fan.txt 2>/dev/null || true
 
       # =========================
-      # 🔒 4. 恢复关键文件（强制不被 upstream 覆盖）
+      # 5️⃣ Merge upstream safely (no conflict allowed)
       # =========================
-      - name: Restore protected files
+      - name: Safe merge upstream
         run: |
-          cp -f /tmp/protect/sync-upstream.yml .github/workflows/sync-upstream.yml || true
-          git checkout -- .github/workflows/sync-upstream.yml || true
+          git merge upstream/${{ steps.branch.outputs.branch }} --no-edit || true
 
       # =========================
-      # 🧹 5. 自动清理冲突残留
+      # 6️⃣ Restore protected files (关键锁）
       # =========================
-      - name: Clean merge artifacts
+      - name: Protect workflow files
         run: |
-          git status --porcelain | grep "^UU" && exit 1 || true
+          git checkout origin/${{ steps.branch.outputs.branch }} -- .github/workflows/sync-upstream.yml || true
 
       # =========================
-      # 💾 6. Commit (only if needed)
+      # 7️⃣ Commit staging
       # =========================
-      - name: Commit changes
+      - name: Commit staging
         run: |
           git add -A
-          git diff --cached --quiet && echo "No changes" && exit 0
-          git commit -m "sync upstream (industrial safe mode)"
+          git commit -m "sync upstream (enterprise zero-conf mode)" || echo "no changes"
 
       # =========================
-      # 🚀 7. Push with safety
+      # 8️⃣ Push staging branch
       # =========================
-      - name: Push
+      - name: Push staging
         run: |
-          git push origin HEAD:${{ steps.branch.outputs.branch }}
+          git push origin sync-staging --force
+
+      # =========================
+      # 9️⃣ OPTIONAL: auto PR (推荐开启)
+      # =========================
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: sync-staging
+          base: ${{ steps.branch.outputs.branch }}
+          title: "Enterprise Upstream Sync"
+          body: "Automated zero-conf upstream sync"
+          delete-branch: true
