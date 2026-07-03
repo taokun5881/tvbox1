@@ -1,95 +1,75 @@
-name: Safe Enterprise Sync Engine (No Security Triggers)
+name: Sync Upstream
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "0 */6 * * *"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
+env:
+  TARGET_BRANCH: master
+  UPSTREAM_REPO: https://github.com/qist/tvbox.git
+  UPSTREAM_BRANCH: master
+
 concurrency:
-  group: safe-sync-engine
-  cancel-in-progress: true
+  group: sync-upstream-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   sync:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout target branch
         uses: actions/checkout@v4
         with:
+          ref: ${{ env.TARGET_BRANCH }}
           fetch-depth: 0
 
-      - name: Git config
+      - name: Configure git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      # =========================
-      # 1️⃣ Fetch upstream
-      # =========================
-      - name: Fetch upstream
+      - name: Add upstream remote
         run: |
-          git remote remove upstream 2>/dev/null || true
-          git remote add upstream https://github.com/qist/tvbox.git
-          git fetch upstream --prune
+          git remote add upstream "$UPSTREAM_REPO" || git remote set-url upstream "$UPSTREAM_REPO"
+          git fetch --no-tags upstream "$UPSTREAM_BRANCH"
 
-      # =========================
-      # 2️⃣ Create safe sync branch
-      # =========================
-      - name: Create sync branch
+      - name: Merge upstream and keep local workflows
+        shell: bash
         run: |
-          git checkout -b sync-staging upstream/master || \
-          git checkout -b sync-staging upstream/main
+          set -euo pipefail
 
-      # =========================
-      # 3️⃣ HARD EXCLUDE workflows (关键)
-      # =========================
-      - name: Remove protected directories
-        run: |
-          rm -rf .github/workflows || true
+          backup_dir="$RUNNER_TEMP/local-workflows"
+          mkdir -p "$backup_dir"
+          cp -a .github/workflows/. "$backup_dir/"
 
-      # =========================
-      # 4️⃣ Smart conflict policy
-      # =========================
-      - name: Apply sync rules
-        run: |
+          if ! git merge --no-commit --no-ff "upstream/$UPSTREAM_BRANCH"; then
+            git status --short
+            echo "::error::Upstream merge has conflicts. Resolve them manually, then rerun this workflow."
+            exit 1
+          fi
 
-          # JSON → use upstream version
-          find . -name "*.json" -type f | while read f; do
-            git checkout --theirs "$f" 2>/dev/null || true
-            git add "$f" 2>/dev/null || true
-          done
-
-          # binary → keep local
-          git checkout --ours jar/fan.txt 2>/dev/null || true
-          git add jar/fan.txt 2>/dev/null || true
-
-      # =========================
-      # 5️⃣ Commit only safe files
-      # =========================
-      - name: Commit sync
-        run: |
+          rm -rf .github/workflows
+          mkdir -p .github/workflows
+          cp -a "$backup_dir/." .github/workflows/
           git add -A
-          git commit -m "safe upstream sync (no workflow touch)" || echo "no changes"
 
-      # =========================
-      # 6️⃣ Push sync branch ONLY
-      # =========================
-      - name: Push sync branch
+      - name: Commit synced changes
+        shell: bash
         run: |
-          git push origin sync-staging --force
+          set -euo pipefail
 
-      # =========================
-      # 7️⃣ Create PR (SAFE ENTRY POINT)
-      # =========================
-      - name: Create Pull Request
-        uses: peter-evans/create-pull-request@v6
-        with:
-          branch: sync-staging
-          base: master
-          title: "Safe Upstream Sync (No Workflow Changes)"
-          body: |
-            Automated sync from upstream.
-            - No workflow modifications included
-            - JSON + code sync only
-            - Binary files preserved safely
+          if [ -f .git/MERGE_HEAD ]; then
+            git commit --allow-empty -m "sync: upstream update"
+          elif ! git diff --quiet HEAD; then
+            git commit -m "sync: upstream update"
+          else
+            echo "No upstream changes to sync."
+          fi
+
+      - name: Push target branch
+        run: git push origin "HEAD:$TARGET_BRANCH"
