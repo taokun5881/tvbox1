@@ -1,0 +1,67 @@
+name: Package xiaosa ZIP
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows:
+      - Update xiaosa
+    types:
+      - completed
+
+permissions:
+  contents: write
+
+env:
+  TARGET_BRANCH: master
+  ZIP_NAME: xiaosa.ZIP
+
+concurrency:
+  group: package-xiaosa-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout target branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
+
+      - name: Create xiaosa ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -d xiaosa ]; then
+            echo "::error::未找到 xiaosa 目录"
+            exit 1
+          fi
+
+          rm -f "$ZIP_NAME"
+          zip -r "$ZIP_NAME" xiaosa
+
+      - name: Upload xiaosa ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: xiaosa-ZIP
+          path: ${{ env.ZIP_NAME }}
+
+      - name: Commit xiaosa ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "$ZIP_NAME"
+
+          if git diff --cached --quiet; then
+            echo "xiaosa.ZIP 没有变化，不提交"
+          else
+            git commit -m "build: update xiaosa.ZIP"
+            git push origin "HEAD:$TARGET_BRANCH"
+          fi
