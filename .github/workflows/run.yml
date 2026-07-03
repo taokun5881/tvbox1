@@ -16,35 +16,31 @@ jobs:
       - name: Checkout the branch
         uses: actions/checkout@v6
 
+      # - name: wget the xiaosa
+      #   run: |
+      #      pwd
+      #      cd xiaosa/
+      #      wget https://raw.githubusercontent.com/PizazzGY/NewTVBox/main/local/%E5%8D%95%E7%BA%BF%E8%B7%AF.zip -O xiaosa.zip
+      #      unzip xiaosa.zip
+      #      \cp -pdr TVBoxOSC/tvbox/* ./
+      #      rm -rf xiaosa.zip TVBoxOSC
+      #      cd ../
+      #   shell: bash
       - name: xiaosa tools
         run: |
           pwd
-          pip install demjson3 pycryptodome requests --break-system-packages
-
-          upstream_dir="$RUNNER_TEMP/NewTVBox"
-          rm -rf "$upstream_dir"
-          git clone --depth=1 --branch main https://github.com/PizazzGY/NewTVBox.git "$upstream_dir"
-
-          source_dir=$(find "$upstream_dir" -type d -path "*/TVBoxOSC/tvbox" | head -n 1)
-          if [ -z "$source_dir" ]; then
-            echo "未找到 TVBoxOSC/tvbox 目录"
-            find "$upstream_dir" -maxdepth 4 -type d | sort
-            exit 1
-          fi
-
-          echo "使用目录：$source_dir"
-          rm -rf xiaosa
-          mkdir -p xiaosa
-          cp -a "$source_dir/." xiaosa/
-
           cd tools/
+          pip install demjson3 pycryptodome requests --break-system-packages
+          python tvbox.py https://9877.kstore.space/ONE/one.json xs.json dec
+          python build_local.py xs.json output
+          \cp -pdr output/* ../xiaosa/
           python xiao.py ../xiaosa/api.json dianshi.json
           python xiao.py ../xiaosa/api.json jsm.json
           python copy_xbpq.py dianshi_with_app_sites.json
-          cp -pdr dianshi_with_app_sites.json ../dianshi.json
-          cp -pdr jsm_with_app_sites.json ../jsm.json
-          cp -pdr ../xiaosa/spider.jar ../jar/spider.jar
-          rm -rf dianshi_with_app_sites.json jsm_with_app_sites.json
+          \cp -pdr dianshi_with_app_sites.json ../dianshi.json
+          \cp -pdr jsm_with_app_sites.json ../jsm.json
+          \cp -pdr ../xiaosa/spider.jar ../jar/spider.jar
+          rm -rf dianshi_with_app_sites.json jsm_with_app_sites.json output xs.json
           cd ../
         shell: bash
       - name: Upload xiaosa artifacts
