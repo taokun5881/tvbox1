@@ -47,16 +47,28 @@ jobs:
           mkdir -p "$backup_dir"
           cp -a .github/workflows/. "$backup_dir/"
 
-          if ! git merge --no-commit --no-ff "upstream/$UPSTREAM_BRANCH"; then
+          set +e
+          git merge --no-commit --no-ff "upstream/$UPSTREAM_BRANCH"
+          merge_exit=$?
+          set -e
+
+          if [ "$merge_exit" -ne 0 ]; then
+            echo "Upstream merge had conflicts. Keeping local workflows and using upstream versions for all other conflicted files."
             git status --short
-            echo "::error::Upstream merge has conflicts. Resolve them manually, then rerun this workflow."
-            exit 1
+            git checkout --theirs -- .
           fi
 
           rm -rf .github/workflows
           mkdir -p .github/workflows
           cp -a "$backup_dir/." .github/workflows/
           git add -A
+
+          if git diff --cached --check; then
+            echo "Conflict resolution completed."
+          else
+            echo "::error::Resolved files still contain invalid diff content."
+            exit 1
+          fi
 
       - name: Commit synced changes
         shell: bash
