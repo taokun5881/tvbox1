@@ -1,17 +1,12 @@
-name: Sync Upstream
+name: Sync upstream
 
 on:
   schedule:
-    - cron: "0 */6 * * *"
+    - cron: "0 3 * * *"
   workflow_dispatch:
 
 permissions:
   contents: write
-
-env:
-  TARGET_BRANCH: master
-  UPSTREAM_REPO: https://github.com/qist/tvbox.git
-  UPSTREAM_BRANCH: master
 
 concurrency:
   group: sync-upstream-${{ github.ref }}
@@ -20,68 +15,31 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
-
+    env:
+      TARGET_BRANCH: master
+      UPSTREAM_REPO: qist/tvbox
+      UPSTREAM_BRANCH: master
     steps:
-      - name: Checkout target branch
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: ${{ env.TARGET_BRANCH }}
           fetch-depth: 0
-
-      - name: Configure git
-        run: |
+      - run: |
           git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Add upstream remote
-        run: |
-          git remote add upstream "$UPSTREAM_REPO" || git remote set-url upstream "$UPSTREAM_REPO"
-          git fetch --no-tags upstream "$UPSTREAM_BRANCH"
-
-      - name: Merge upstream and keep local workflows
-        shell: bash
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git" || git remote set-url upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch upstream "${UPSTREAM_BRANCH}" --prune
+      - shell: bash
         run: |
           set -euo pipefail
-
           backup_dir="$RUNNER_TEMP/local-workflows"
           mkdir -p "$backup_dir"
-          cp -a .github/workflows/. "$backup_dir/"
-
-          set +e
-          git merge --no-commit --no-ff "upstream/$UPSTREAM_BRANCH"
-          merge_exit=$?
-          set -e
-
-          if [ "$merge_exit" -ne 0 ]; then
-            echo "Upstream merge had conflicts. Keeping local workflows and using upstream versions for all other conflicted files."
-            git status --short
-            git checkout --theirs -- .
-          fi
-
+          [ -d .github/workflows ] && cp -a .github/workflows/. "$backup_dir/" || true
+          git merge --no-edit "upstream/${UPSTREAM_BRANCH}"
           rm -rf .github/workflows
           mkdir -p .github/workflows
-          cp -a "$backup_dir/." .github/workflows/
-          git add -A
-
-          if git diff --cached --check; then
-            echo "Conflict resolution completed."
-          else
-            echo "::error::Resolved files still contain invalid diff content."
-            exit 1
-          fi
-
-      - name: Commit synced changes
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [ -f .git/MERGE_HEAD ]; then
-            git commit --allow-empty -m "sync: upstream update"
-          elif ! git diff --quiet HEAD; then
-            git commit -m "sync: upstream update"
-          else
-            echo "No upstream changes to sync."
-          fi
-
-      - name: Push target branch
-        run: git push origin "HEAD:$TARGET_BRANCH"
+          cp -a "$backup_dir/." .github/workflows/ || true
+          git add -A .github/workflows
+          git diff --cached --quiet || git commit -m "ci: keep local workflows after upstream sync"
+      - run: git push origin "HEAD:${TARGET_BRANCH}"
+      - run: git push --tags origin
