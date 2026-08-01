@@ -1,7 +1,7 @@
 name: Auto Upstream Sync Pro
 
 on:
-  workflow_dispatch:
+  workflow_dispatch
 
   schedule:
     - cron: "*/30 * * * *"
@@ -19,7 +19,7 @@ jobs:
 
 
     env:
-      UPSTREAM_REPO: https://github.com/替换成你的上游仓库.git
+      UPSTREAM_REPO: https://github.com/qist/tvbox.git
       BRANCH: master
 
 
@@ -66,9 +66,7 @@ jobs:
         set +e
 
 
-        git merge upstream/master \
-        --no-edit \
-        -X theirs
+        git merge upstream/master         --no-edit         -X theirs
 
 
         RESULT=$?
@@ -83,27 +81,20 @@ jobs:
 
           # 所有文本冲突默认 upstream
 
-          git diff --name-only --diff-filter=U \
-          | grep -v '^jar/' \
-          | xargs -r git checkout --theirs
+          git diff --name-only --diff-filter=U           | grep -v '^jar/'           | xargs -r git checkout --theirs
 
 
 
           # 二进制保护本地
 
-          git diff --name-only --diff-filter=U \
-          | grep '^jar/' \
-          | xargs -r git checkout --ours
+          git diff --name-only --diff-filter=U           | grep '^jar/'           | xargs -r git checkout --ours
 
 
 
           git add .
 
 
-          git commit \
-          -m "Auto resolve upstream conflicts" \
-          || true
-
+          git commit           -m "Auto resolve upstream conflicts"           || true
 
         fi
 
@@ -141,9 +132,7 @@ jobs:
 
         git add .
 
-        git commit \
-        -m "Protect local workflow and jar files" \
-        || true
+        git commit         -m "Protect local workflow and jar files"         || true
 
 
 
@@ -158,5 +147,4 @@ jobs:
 
     - name: Push
       run: |
-
         git push origin master
