@@ -1,150 +1,80 @@
 name: Auto Upstream Sync Pro
 
 on:
-  workflow_dispatch
-
+  workflow_dispatch:
   schedule:
     - cron: "*/30 * * * *"
-
 
 permissions:
   contents: write
 
-
 jobs:
-
   sync:
-
     runs-on: ubuntu-latest
-
-
     env:
       UPSTREAM_REPO: https://github.com/qist/tvbox.git
-      BRANCH: master
-
 
     steps:
-
-
-    - name: Checkout
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-
-
-    - name: Configure git
-      run: |
-        git config user.name "github-actions[bot]"
-        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-
-    - name: Add upstream
-      run: |
-
-        git remote remove upstream 2>/dev/null || true
-
-        git remote add upstream $UPSTREAM_REPO
-
-        git fetch upstream master --prune
-
-
-
-    - name: Save protected files
-      run: |
-
-        mkdir -p /tmp/protect
-
-        cp -r .github /tmp/protect/github 2>/dev/null || true
-
-        cp -r jar /tmp/protect/jar 2>/dev/null || true
-
-
-
-    - name: Merge upstream automatically
-      run: |
-
-        set +e
-
-
-        git merge upstream/master         --no-edit         -X theirs
-
-
-        RESULT=$?
-
-
-        if [ $RESULT -ne 0 ]; then
-
-          echo "Conflict detected"
-
-          git status
-
-
-          # 所有文本冲突默认 upstream
-
-          git diff --name-only --diff-filter=U           | grep -v '^jar/'           | xargs -r git checkout --theirs
-
-
-
-          # 二进制保护本地
-
-          git diff --name-only --diff-filter=U           | grep '^jar/'           | xargs -r git checkout --ours
-
-
-
-          git add .
-
-
-          git commit           -m "Auto resolve upstream conflicts"           || true
-
-        fi
-
-
-
-    - name: Restore protected files
-      run: |
-
-
-        echo "Restore workflow"
-
-
-        if [ -d /tmp/protect/github ]; then
-
-          rm -rf .github
-
-          cp -r /tmp/protect/github .github
-
-        fi
-
-
-
-        echo "Restore jars"
-
-
-        if [ -d /tmp/protect/jar ]; then
-
-          rm -rf jar
-
-          cp -r /tmp/protect/jar jar
-
-        fi
-
-
-
-        git add .
-
-        git commit         -m "Protect local workflow and jar files"         || true
-
-
-
-    - name: Validate repository
-      run: |
-
-        git status
-
-        git diff --stat HEAD~1 || true
-
-
-
-    - name: Push
-      run: |
-        git push origin master
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream
+        run: |
+          git remote remove upstream 2>/dev/null || true
+          git remote add upstream "$UPSTREAM_REPO"
+          git fetch upstream master --prune
+
+      - name: Save protected files
+        run: |
+          mkdir -p "$RUNNER_TEMP/protect"
+          cp -a .github "$RUNNER_TEMP/protect/github" 2>/dev/null || true
+          cp -a jar "$RUNNER_TEMP/protect/jar" 2>/dev/null || true
+
+      - name: Merge upstream automatically
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! git merge upstream/master --no-edit -X theirs; then
+            echo "Conflict detected; resolving unprotected files from upstream."
+            while IFS= read -r file; do
+              case "$file" in
+                .github/workflows/*|jar/*)
+                  git checkout --ours -- "$file"
+                  ;;
+                *)
+                  git checkout --theirs -- "$file"
+                  ;;
+              esac
+            done < <(git diff --name-only --diff-filter=U)
+            git add -A
+            git commit -m "ci: resolve upstream sync conflicts"
+          fi
+
+      - name: Restore protected files
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -d "$RUNNER_TEMP/protect/github" ]; then
+            rm -rf .github
+            cp -a "$RUNNER_TEMP/protect/github" .github
+          fi
+          if [ -d "$RUNNER_TEMP/protect/jar" ]; then
+            rm -rf jar
+            cp -a "$RUNNER_TEMP/protect/jar" jar
+          fi
+          git add -A
+          git diff --cached --quiet || git commit -m "ci: preserve local workflow and jar files"
+
+      - name: Validate repository
+        run: git status --short
+
+      - name: Push
+        run: git push origin master
